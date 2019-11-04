@@ -17,7 +17,7 @@
 //#define WLED_DISABLE_OTA
 
 //You need to choose 1-2 of these features to disable:
-//#define WLED_DISABLE_ALEXA
+#define WLED_DISABLE_ALEXA
 //#define WLED_DISABLE_BLYNK
 //#define WLED_DISABLE_CRONIXIE
 //#define WLED_DISABLE_HUESYNC
