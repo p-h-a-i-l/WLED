@@ -3,7 +3,7 @@
  */
 /*
  * @title WLED project sketch
- * @version 0.8.5-dev
+ * @version 0.8.6
  * @author Christian Schwinne
  */
 
@@ -35,15 +35,16 @@
 
 //library inclusions
 #include <Arduino.h>
-#ifdef ARDUINO_ARCH_ESP32
- #include <WiFi.h>
- #include <ESPmDNS.h>
- #include <AsyncTCP.h>
- #include "SPIFFS.h"
-#else
+#ifdef ESP8266
  #include <ESP8266WiFi.h>
  #include <ESP8266mDNS.h>
  #include <ESPAsyncTCP.h>
+#else
+ #include <WiFi.h>
+ #include "esp_wifi.h"
+ #include <ESPmDNS.h>
+ #include <AsyncTCP.h>
+ #include "SPIFFS.h"
 #endif
 
 #include <ESPAsyncWebServer.h>
@@ -61,6 +62,7 @@
  #define ESPALEXA_ASYNC
  #define ESPALEXA_NO_SUBPAGE
  #define ESPALEXA_MAXDEVICES 1
+ //#define ESPALEXA_DEBUG
  #include "src/dependencies/espalexa/Espalexa.h"
 #endif
 #ifndef WLED_DISABLE_BLYNK
@@ -98,8 +100,8 @@
 
 
 //version code in format yymmddb (b = daily build)
-#define VERSION 1910073
-char versionString[] = "0.8.5";
+#define VERSION 1911031
+char versionString[] = "0.8.6";
 
 
 //AP and OTA default passwords (for maximum change them!)
@@ -122,8 +124,9 @@ char cmDNS[33] = "x";                         //mDNS address (placeholder, will 
 char apSSID[33] = "";                         //AP off by default (unless setup)
 byte apChannel = 1;                           //2.4GHz WiFi AP channel (1-13)
 byte apHide = 0;                              //hidden AP SSID
-byte apWaitTimeSecs = 32;                     //time to wait for connection before opening AP
-bool recoveryAPDisabled = false;              //never open AP (not recommended)
+//byte apWaitTimeSecs = 32;                   //time to wait for connection before opening AP
+byte apBehavior = 0;                          //0: Open AP when no connection after boot 1: Open when no connection 2: Always open 3: Only when button pressed for 6 sec
+//bool recoveryAPDisabled = false;            //never open AP (not recommended)
 IPAddress staticIP(0, 0, 0, 0);               //static IP of ESP
 IPAddress staticGateway(0, 0, 0, 0);          //gateway (router) IP
 IPAddress staticSubnet(255, 255, 255, 0);     //most common subnet in home networks
@@ -144,9 +147,6 @@ byte effectSpeedDefault = 75;
 byte effectIntensityDefault = 128;            //intensity is supported on some effects as an additional parameter (e.g. for blink you can change the duty cycle)
 byte effectPaletteDefault = 0;                //palette is supported on the FastLED effects, otherwise it has no effect
 
-//bool strip.gammaCorrectBri = false;         //gamma correct brightness (not recommended) --> edit in WS2812FX.h
-//bool strip.gammaCorrectCol = true;          //gamma correct colors (strongly recommended)
-
 byte nightlightTargetBri = 0;                 //brightness after nightlight is over
 byte nightlightDelayMins = 60;
 bool nightlightFade = true;                   //if enabled, light will gradually dim towards the target bri. Otherwise, it will instantly set after delay over
@@ -162,7 +162,7 @@ byte briMultiplier =  100;                    //% of brightness to set (to limit
 //User Interface CONFIG
 char serverDescription[33] = "WLED";          //Name of module
 byte currentTheme = 7;                        //UI theme index for settings and classic UI
-byte uiConfiguration = 0;                     //0: automatic (depends on user-agent) 1: classic UI 2: mobile UI
+byte uiConfiguration = 2;                     //0: automatic (depends on user-agent) 1: classic UI 2: mobile UI
 bool useHSB = true;                           //classic UI: use HSB sliders instead of RGB by default
 char cssFont[33] = "Verdana";                 //font to use in classic UI
 
@@ -258,6 +258,13 @@ uint16_t userVar0 = 0, userVar1 = 0;
 
 
 //internal global variable declarations
+//wifi
+bool apActive = false;
+bool forceReconnect = false;
+uint32_t lastReconnectAttempt = 0;
+bool interfacesInited = false;
+bool wasConnected = false;
+
 //color
 byte col[]{255, 159, 0, 0};                   //target RGB(W) color
 byte colOld[]{0, 0, 0, 0};                    //color before transition
@@ -276,6 +283,7 @@ uint16_t transitionDelayDefault = transitionDelay;
 uint16_t transitionDelayTemp = transitionDelay;
 unsigned long transitionStartTime;
 float tperLast = 0;                           //crossfade transition progress, 0.0f - 1.0f
+bool jsonTransitionOnce = false;
 
 //nightlight
 bool nightlightActive = false;
@@ -296,6 +304,7 @@ byte briLast = 127;                           //brightness before turned off. Us
 
 //button
 bool buttonPressedBefore = false;
+bool buttonLongPressed = false;
 unsigned long buttonPressedTime = 0;
 unsigned long buttonWaitTime = 0;
 
@@ -313,7 +322,6 @@ byte effectIntensity = effectIntensityDefault;
 byte effectPalette = effectPaletteDefault;
 
 //network
-bool onlyAP = false;                          //only Access Point active, no connection to home network
 bool udpConnected = false, udpRgbConnected = false;
 
 //ui style
@@ -330,8 +338,6 @@ unsigned long hueLastRequestSent = 0;
 bool hueAuthRequired = false;
 bool hueReceived = false;
 bool hueStoreAllowed = false, hueNewKey = false;
-//unsigned long huePollIntervalMsTemp = huePollIntervalMs;
-//bool hueAttempt = false;
 
 //overlays
 byte overlayCurrent = overlayDefault;
@@ -377,7 +383,7 @@ IPAddress realtimeIP = (0,0,0,0);
 unsigned long realtimeTimeout = 0;
 
 //mqtt
-long nextMQTTReconnectAttempt = 0;
+long lastMqttReconnectAttempt = 0;
 long lastInterfaceUpdate = 0;
 byte interfaceUpdateCallMode = 0;
 
@@ -397,7 +403,6 @@ EspalexaDevice* espalexaDevice;
 
 //dns server
 DNSServer dnsServer;
-bool dnsActive = false;
 
 //network time
 bool ntpConnected = false;
@@ -405,8 +410,11 @@ time_t local = 0;
 unsigned long ntpLastSyncTime = 999000000L;
 unsigned long ntpPacketSentTime = 999000000L;
 IPAddress ntpServerIP;
-unsigned int ntpLocalPort = 2390;
+uint16_t ntpLocalPort = 2390;
 #define NTP_PACKET_SIZE 48
+
+#define MAX_LEDS 1500
+#define MAX_LEDS_DMA 500
 
 //string temp buffer (now stored in stack locally)
 #define OMAX 2048
@@ -417,6 +425,8 @@ String messageHead, messageSub;
 byte optionType;
 
 bool doReboot = false; //flag to initiate reboot from async handlers
+bool doPublishMqtt = false;
+bool doSendHADiscovery = true;
 
 //server library objects
 AsyncWebServer server(80);
@@ -431,6 +441,9 @@ E131* e131;
 //led fx library object
 WS2812FX strip = WS2812FX();
 
+#define WLED_CONNECTED (WiFi.status() == WL_CONNECTED)
+#define WLED_WIFI_CONFIGURED (strlen(clientSSID) >= 1 && strcmp(clientSSID,"Your_Network") != 0)
+
 //debug macros
 #ifdef WLED_DEBUG
  #define DEBUG_PRINT(x)  Serial.print (x)
@@ -439,6 +452,7 @@ WS2812FX strip = WS2812FX();
  unsigned long debugTime = 0;
  int lastWifiState = 3;
  unsigned long wifiStateChangedTime = 0;
+ int loops = 0;
 #else
  #define DEBUG_PRINT(x)
  #define DEBUG_PRINTLN(x)
@@ -453,6 +467,7 @@ WS2812FX strip = WS2812FX();
  #endif
  #include "SPIFFSEditor.h"
 #endif
+
 
 //function prototypes
 void serveMessage(AsyncWebServerRequest*,uint16_t,String,String,byte);
@@ -495,13 +510,13 @@ bool oappendi(int i)
 
 //boot starts here
 void setup() {
-  pinMode(4, OUTPUT); digitalWrite(4, HIGH);
   wledInit();
 }
 
 
 //main program loop
 void loop() {
+  handleConnection();
   handleSerial();
   handleNotifications();
   handleTransitions();
@@ -511,35 +526,30 @@ void loop() {
   handleIO();
   handleIR();
   handleNetworkTime();
-  if (!onlyAP) handleAlexa();
+  handleAlexa();
 
   handleOverlays();
-
+  if (doSendHADiscovery) sendHADiscoveryMQTT();
   yield();
   if (doReboot) reset();
 
   if (!realtimeActive) //block stuff if WARLS/Adalight is enabled
   {
-    if (dnsActive) dnsServer.processNextRequest();
+    if (apActive) dnsServer.processNextRequest();
     #ifndef WLED_DISABLE_OTA
-     if (aOtaEnabled) ArduinoOTA.handle();
+    if (WLED_CONNECTED && aOtaEnabled) ArduinoOTA.handle();
     #endif
     handleNightlight();
     yield();
-    if (!onlyAP) {
-      handleHue();
-      handleBlynk();
-      yield();
-      if (millis() > nextMQTTReconnectAttempt)
-      {
-        yield();
-        initMqtt();
-        nextMQTTReconnectAttempt = millis() + 30000;
-      }
-    }
+
+    handleHue();
+    handleBlynk();
+
     yield();
     if (!offMode) strip.service();
   }
+  yield();
+  if (millis() - lastMqttReconnectAttempt > 30000) initMqtt();
 
   //DEBUG serial logging
   #ifdef WLED_DEBUG
@@ -558,7 +568,10 @@ void loop() {
      DEBUG_PRINT("State time: "); DEBUG_PRINTLN(wifiStateChangedTime);
      DEBUG_PRINT("NTP last sync: "); DEBUG_PRINTLN(ntpLastSyncTime);
      DEBUG_PRINT("Client IP: "); DEBUG_PRINTLN(WiFi.localIP());
+     DEBUG_PRINT("Loops/sec: "); DEBUG_PRINTLN(loops/10);
+     loops = 0;
      debugTime = millis();
    }
+   loops++;
   #endif
 }

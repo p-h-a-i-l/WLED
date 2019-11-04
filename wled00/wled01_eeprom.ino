@@ -134,8 +134,8 @@ void saveSettingsToEEPROM()
   EEPROM.write(372, useRGBW);
   EEPROM.write(373, effectPaletteDefault);
   EEPROM.write(374, strip.paletteFade);
-  EEPROM.write(375, apWaitTimeSecs);
-  EEPROM.write(376, recoveryAPDisabled);
+  //EEPROM.write(375, apWaitTimeSecs);
+  EEPROM.write(376, apBehavior);
 
   EEPROM.write(377, EEPVER); //eeprom was updated to latest
 
@@ -298,7 +298,7 @@ void loadSettingsFromEEPROM(bool first)
   if (apChannel > 13 || apChannel < 1) apChannel = 1;
   apHide = EEPROM.read(228);
   if (apHide > 1) apHide = 1;
-  ledCount = EEPROM.read(229) + ((EEPROM.read(398) << 8) & 0xFF00); if (ledCount > 1200 || ledCount == 0) ledCount = 30;
+  ledCount = EEPROM.read(229) + ((EEPROM.read(398) << 8) & 0xFF00); if (ledCount > MAX_LEDS || ledCount == 0) ledCount = 30;
 
   notifyButton = EEPROM.read(230);
   notifyTwice = EEPROM.read(231);
@@ -365,8 +365,8 @@ void loadSettingsFromEEPROM(bool first)
   //374 - strip.paletteFade
 
   if (lastEEPROMversion > 0) {
-    apWaitTimeSecs = EEPROM.read(375);
-    recoveryAPDisabled = EEPROM.read(376);
+    //apWaitTimeSecs = EEPROM.read(375);
+    apBehavior = EEPROM.read(376);
   }
   //377 = lastEEPROMversion
   if (lastEEPROMversion > 1) {

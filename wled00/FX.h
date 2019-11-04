@@ -314,6 +314,7 @@ class WS2812FX {
       targetPalette = CloudColors_p;
       ablMilliampsMax = 850;
       currentMilliamps = 0;
+      timebase = 0;
       _locked = nullptr;
       _modeUsesLock = false;
       bus = new NeoPixelWrapper();
@@ -378,6 +379,7 @@ class WS2812FX {
       currentMilliamps;
 
     uint32_t
+      timebase,
       color_wheel(uint8_t),
       color_from_palette(uint16_t, bool, bool, uint8_t, uint8_t pbri = 255),
       color_blend(uint32_t,uint32_t,uint8_t),
@@ -543,7 +545,7 @@ class WS2812FX {
 //10 names per line
 const char JSON_mode_names[] PROGMEM = R"=====([
 "Solid","Blink","Breathe","Wipe","Wipe Random","Random Colors","Sweep","Dynamic","Colorloop","Rainbow",
-"Scan","Dual Scan","Fade","Chase","Chase Rainbow","Running","Saw","Twinkle","Dissolve","Dissolve Rnd",
+"Scan","Dual Scan","Fade","Theater","Theater Rainbow","Running","Saw","Twinkle","Dissolve","Dissolve Rnd",
 "Sparkle","Dark Sparkle","Sparkle+","Strobe","Strobe Rainbow","Mega Strobe","Blink Rainbow","Android","Chase","Chase Random",
 "Chase Rainbow","Chase Flash","Chase Flash Rnd","Rainbow Runner","Colorful","Traffic Light","Sweep Random","Running 2","Red & Blue","Stream",
 "Scanner","Lighthouse","Fireworks","Rain","Merry Christmas","Fire Flicker","Gradient","Loading","In Out","In In",

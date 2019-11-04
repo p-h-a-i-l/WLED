@@ -28,12 +28,12 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
 
     strcpy(cmDNS, request->arg("CM").c_str());
 
-    int t = request->arg("AT").toInt(); if (t > 9 && t <= 255) apWaitTimeSecs = t;
+    apBehavior = request->arg("AB").toInt();
     strcpy(apSSID, request->arg("AS").c_str());
     apHide = request->hasArg("AH");
     int passlen = request->arg("AP").length();
     if (passlen == 0 || (passlen > 7 && request->arg("AP").charAt(0) != '*')) strcpy(apPass, request->arg("AP").c_str());
-    t = request->arg("AC").toInt(); if (t > 0 && t < 14) apChannel = t;
+    int t = request->arg("AC").toInt(); if (t > 0 && t < 14) apChannel = t;
 
     char k[3]; k[2] = 0;
     for (int i = 0; i<4; i++)
@@ -55,10 +55,10 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
   if (subPage == 2)
   {
     int t = request->arg("LC").toInt();
-    if (t > 0 && t <= 1200) ledCount = t;
+    if (t > 0 && t <= MAX_LEDS) ledCount = t;
     #ifndef ARDUINO_ARCH_ESP32
     #if LEDPIN == 3
-    if (ledCount > 300) ledCount = 300; //DMA method uses too much ram
+    if (ledCount > MAX_LEDS_DMA) ledCount = MAX_LEDS_DMA; //DMA method uses too much ram
     #endif
     #endif
     strip.ablMilliampsMax = request->arg("MA").toInt();
@@ -214,7 +214,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     utcOffsetSecs = request->arg("UO").toInt();
 
     //start ntp if not already connected
-    if (ntpEnabled && WiFi.status() == WL_CONNECTED && !ntpConnected) ntpConnected = ntpUdp.begin(ntpLocalPort);
+    if (ntpEnabled && WLED_CONNECTED && !ntpConnected) ntpConnected = ntpUdp.begin(ntpLocalPort);
 
     if (request->hasArg("OL")){
       overlayDefault = request->arg("OL").toInt();
@@ -304,7 +304,6 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     {
       otaLock = request->hasArg("NO");
       wifiLock = request->hasArg("OW");
-      recoveryAPDisabled = request->hasArg("NA");
       aOtaEnabled = request->hasArg("AO");
     }
   }

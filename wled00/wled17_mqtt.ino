@@ -2,8 +2,6 @@
  * MQTT communication protocol for home automation
  */
 
-//#define WLED_MQTT_PORT 1883
-
 void parseMQTTBriPayload(char* payload)
 {
   if      (strstr(payload, "ON") || strstr(payload, "on") || strstr(payload, "true")) {bri = briLast; colorUpdated(1);}
@@ -45,15 +43,15 @@ void onMqttConnect(bool sessionPresent)
     mqtt->subscribe(subuf, 0);
   }
 
-  sendHADiscoveryMQTT();
-  publishMqtt();
-  DEBUG_PRINTLN("MQ ready");
+  doSendHADiscovery = true;
+  doPublishMqtt = true;
+  DEBUG_PRINTLN("MQTT ready");
 }
 
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
 
-  DEBUG_PRINT("MQ callb rec: ");
+  DEBUG_PRINT("MQTT msg: ");
   DEBUG_PRINTLN(topic);
   DEBUG_PRINTLN(payload);
 
@@ -74,8 +72,8 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 
 void publishMqtt()
 {
-  if (mqtt == NULL) return;
-  if (!mqtt->connected()) return;
+  doPublishMqtt = false;
+  if (mqtt == nullptr || !mqtt->connected()) return;
   DEBUG_PRINTLN("Publish MQTT");
 
   char s[10];
@@ -100,13 +98,15 @@ void publishMqtt()
 
 const char HA_static_JSON[] PROGMEM = R"=====(,"bri_val_tpl":"{{value}}","rgb_cmd_tpl":"{{'#%02x%02x%02x' | format(red, green, blue)}}","rgb_val_tpl":"{{value[1:3]|int(base=16)}},{{value[3:5]|int(base=16)}},{{value[5:7]|int(base=16)}}","qos":0,"opt":true,"pl_on":"ON","pl_off":"OFF","fx_val_tpl":"{{value}}","fx_list":[)=====";
 
+char* buffer;
+
 void sendHADiscoveryMQTT()
 {
-
-#if ARDUINO_ARCH_ESP32 || LEDPIN != 3
+//TODO: With LwIP 1 the ESP loses MQTT connection and causes memory leak when sending discovery packet
+#if ARDUINO_ARCH_ESP32 || LWIP_VERSION_MAJOR > 1
 /*
 
-YYYY is discovery tipic
+YYYY is device topic
 XXXX is device name
 
 Send out HA MQTT Discovery message on MQTT connect (~2.4kB):
@@ -137,7 +137,12 @@ Send out HA MQTT Discovery message on MQTT connect (~2.4kB):
 }
 
   */
-  char bufc[36], bufcol[38], bufg[36], bufapi[38], buffer[2500];
+  doSendHADiscovery = false;
+  if (mqtt == nullptr || !mqtt->connected()) return;
+  buffer = new char[2400];
+  if (!buffer) {delete[] buffer; return;}
+  
+  char bufc[36], bufcol[38], bufg[36], bufapi[38];
 
   strcpy(bufc, mqttDeviceTopic);
   strcpy(bufcol, mqttDeviceTopic);
@@ -161,7 +166,7 @@ Send out HA MQTT Discovery message on MQTT connect (~2.4kB):
   root["fx_stat_t"] = bufapi;
 
   size_t jlen = measureJson(root);
-  DEBUG_PRINTLN(jlen);
+  //DEBUG_PRINTLN(jlen);
   serializeJson(root, buffer, jlen);
 
   //add values which don't change
@@ -193,7 +198,7 @@ Send out HA MQTT Discovery message on MQTT connect (~2.4kB):
         mdn[namelen] = 0;
         snprintf(mdnfx, 64, "\"[FX=%02d] %s\",", i, mdn);
         oappend(mdnfx);
-        DEBUG_PRINTLN(mdnfx);
+        //DEBUG_PRINTLN(mdnfx);
         i++;
       }
       isNameStart = !isNameStart;
@@ -206,20 +211,29 @@ Send out HA MQTT Discovery message on MQTT connect (~2.4kB):
   DEBUG_PRINTLN(buffer);
 
   char pubt[25 + 12 + 8];
-  strcpy(pubt, "homeassistant/light/WLED_");
-  strcat(pubt, escapedMac.c_str());
+  strcpy(pubt, "homeassistant/light/");
+  strcat(pubt, mqttClientID);
   strcat(pubt, "/config");
-  mqtt->publish(pubt, 0, true, buffer);
+  bool success = mqtt->publish(pubt, 0, true, buffer);
+  DEBUG_PRINTLN(success);
+  yield();
+  delete[] buffer;
 #endif
 }
 
 bool initMqtt()
 {
-  if (mqttServer[0] == 0) return false;
-  if (WiFi.status() != WL_CONNECTED) return false;
-  if (!mqtt) mqtt = new AsyncMqttClient();
+  lastMqttReconnectAttempt = millis();
+  if (mqttServer[0] == 0 || !WLED_CONNECTED) return false;
+
+  if (mqtt == nullptr) {
+    mqtt = new AsyncMqttClient();
+    mqtt->onMessage(onMqttMessage);
+    mqtt->onConnect(onMqttConnect);
+  }
   if (mqtt->connected()) return true;
 
+  DEBUG_PRINTLN("Reconnecting MQTT");
   IPAddress mqttIP;
   if (mqttIP.fromString(mqttServer)) //see if server is IP or domain
   {
@@ -228,9 +242,7 @@ bool initMqtt()
     mqtt->setServer(mqttServer, mqttPort);
   }
   mqtt->setClientId(mqttClientID);
-  if (mqttUser[0] && mqttPass[0] != 0) mqtt->setCredentials(mqttUser, mqttPass);
-  mqtt->onMessage(onMqttMessage);
-  mqtt->onConnect(onMqttConnect);
+  if (mqttUser[0] && mqttPass[0]) mqtt->setCredentials(mqttUser, mqttPass);
   mqtt->connect();
   return true;
 }

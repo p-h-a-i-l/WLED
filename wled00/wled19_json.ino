@@ -16,6 +16,12 @@ bool deserializeState(JsonObject root)
     transitionDelay = root["transition"];
     transitionDelay *= 100;
   }
+  if (root.containsKey("tt"))
+  {
+    transitionDelayTemp = root["tt"];
+    transitionDelayTemp *= 100;
+    jsonTransitionOnce = true;
+  }
 
   int ps = root["ps"] | -1;
   if (ps >= 0) applyPreset(ps);
@@ -77,21 +83,22 @@ bool deserializeState(JsonObject root)
         }
       }
       
-      byte fx = elem["fx"] | seg.mode;
-      if (fx != seg.mode && fx < strip.getModeCount()) strip.setMode(id, fx);
-      seg.speed = elem["sx"] | seg.speed;
-      seg.intensity = elem["ix"] | seg.intensity;
-      seg.palette = elem["pal"] | seg.palette;
       //if (pal != seg.palette && pal < strip.getPaletteCount()) strip.setPalette(pal);
       seg.setOption(0, elem["sel"] | seg.getOption(0)); //selected
       seg.setOption(1, elem["rev"] | seg.getOption(1)); //reverse
       //int cln = seg_0["cln"];
-      //temporary
+      //temporary, strip object gets updated via colorUpdated()
       if (id == 0) {
-        effectCurrent = seg.mode;
-        effectSpeed = seg.speed;
-        effectIntensity = seg.intensity;
-        effectPalette = seg.palette;
+        effectCurrent = elem["fx"] | effectCurrent;
+        effectSpeed = elem["sx"] | effectSpeed;
+        effectIntensity = elem["ix"] | effectIntensity ;
+        effectPalette = elem["pal"] | effectPalette;
+      } else { //permanent
+        byte fx = elem["fx"] | seg.mode;
+        if (fx != seg.mode && fx < strip.getModeCount()) strip.setMode(id, fx);
+        seg.speed = elem["sx"] | seg.speed;
+        seg.intensity = elem["ix"] | seg.intensity;
+        seg.palette = elem["pal"] | seg.palette;
       }
     }
     it++;
@@ -181,15 +188,24 @@ void serializeInfo(JsonObject root)
   root["live"] = realtimeActive;
   root["fxcount"] = strip.getModeCount();
   root["palcount"] = strip.getPaletteCount();
+
+  JsonObject wifi_info = root.createNestedObject("wifi");
+  wifi_info["bssid"] = WiFi.BSSIDstr();
+  wifi_info["signal"] = getSignalQuality(WiFi.RSSI());
+  wifi_info["channel"] = WiFi.channel();
+  
   #ifdef ARDUINO_ARCH_ESP32
   root["arch"] = "esp32";
   root["core"] = ESP.getSdkVersion();
   //root["maxalloc"] = ESP.getMaxAllocHeap();
+  root["lwip"] = 0;
   #else
   root["arch"] = "esp8266";
   root["core"] = ESP.getCoreVersion();
   //root["maxalloc"] = ESP.getMaxFreeBlockSize();
+  root["lwip"] = LWIP_VERSION_MAJOR;
   #endif
+  
   root["freeheap"] = ESP.getFreeHeap();
   root["uptime"] = millis()/1000;
   

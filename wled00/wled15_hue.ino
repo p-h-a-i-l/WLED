@@ -4,17 +4,6 @@
 #ifndef WLED_DISABLE_HUESYNC
 void handleHue()
 {
-  if (hueClient != nullptr && millis() - hueLastRequestSent > huePollIntervalMs && WiFi.status() == WL_CONNECTED)
-  {
-    hueLastRequestSent = millis();
-    if (huePollingEnabled)
-    {
-      reconnectHue();
-    } else {
-      hueClient->close();
-      if (hueError[0] == 'A') strcpy(hueError,"Inactive");
-    }
-  }
   if (hueReceived)
   {
     colorUpdated(7); hueReceived = false;
@@ -25,11 +14,22 @@ void handleHue()
       hueNewKey = false;
     }
   }
+  
+  if (!WLED_CONNECTED || hueClient == nullptr || millis() - hueLastRequestSent < huePollIntervalMs) return;
+
+  hueLastRequestSent = millis();
+  if (huePollingEnabled)
+  {
+    reconnectHue();
+  } else {
+    hueClient->close();
+    if (hueError[0] == 'A') strcpy(hueError,"Inactive");
+  }
 }
 
 void reconnectHue()
 {
-  if (WiFi.status() != WL_CONNECTED || !huePollingEnabled) return;
+  if (!WLED_CONNECTED || !huePollingEnabled) return;
   DEBUG_PRINTLN("Hue reconnect");
   if (hueClient == nullptr) {
     hueClient = new AsyncClient();
